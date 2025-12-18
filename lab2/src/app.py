@@ -13,7 +13,7 @@ model = None
 def load_model():
     global model
     try:
-        model_name = "BankingBaseline"
+        model_name = "BankingSupportBaseline"
         print(f"Loading model: {model_name}...")
 
         client = mlflow.MlflowClient()

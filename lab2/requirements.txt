@@ -4,7 +4,7 @@ uvicorn==0.32.0
 pandas==2.2.3
 numpy==2.2.0
 scikit-learn==1.6.0
-scipy==1.15.3
+scipy==1.14.1
 joblib==1.4.2
 threadpoolctl==3.5.0
 

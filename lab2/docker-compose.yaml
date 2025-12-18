@@ -1,10 +1,11 @@
-# Файл: docker-compose.yaml
 version: '3.8'
 
 services:
   # 1. MLflow Tracking Server
   mlflow:
-    image: ghcr.io/mlflow/mlflow:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.mlflow
     container_name: mlflow_server
     ports:
       - "5000:5000"
@@ -12,13 +13,10 @@ services:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+      - MLFLOW_BACKEND_STORE_URI=sqlite:///mlflow/mlflow.db
+      - MLFLOW_DEFAULT_ARTIFACT_ROOT=${MLFLOW_S3_ROOT}
     volumes:
-      - ./ml_artifacts:/mlflow  # Чтобы база данных не стиралась при перезапуске
-    command: >
-      mlflow server
-      --backend-store-uri sqlite:///mlflow/mlflow.db
-      --default-artifact-root ${MLFLOW_S3_ROOT}
-      --host 0.0.0.0
+      - ./ml_artifacts:/mlflow
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
@@ -45,11 +43,27 @@ services:
       - _AIRFLOW_WWW_USER_PASSWORD=admin
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./src:/opt/airflow/src/etl
+      - ./src/etl:/opt/airflow/src
       - ./data/initial:/opt/airflow/data_initial
     command: bash -c "airflow standalone"
 
-  # 3. Prediction API (Наш сервис с моделью)
+  #3 Train model
+  trainer:
+    build:
+      context: .
+      dockerfile: Dockerfile.train
+    container_name: model_trainer
+    profiles: [ "jobs" ]
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+    volumes:
+      - .:/app
+
+  # 4. Prediction API
   api:
     build: .
     container_name: prediction_service

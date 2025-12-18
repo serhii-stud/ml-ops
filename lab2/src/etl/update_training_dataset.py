@@ -30,7 +30,6 @@ def run_etl():
 
     print("1. Reading Historical Data (Golden Set)...")
     try:
-        # Пути должны совпадать с тем, куда ingest.py положил файлы
         path_train = f"s3://{BUCKET}/data/raw/historical/train.csv"
         path_test = f"s3://{BUCKET}/data/raw/historical/test.csv"
 

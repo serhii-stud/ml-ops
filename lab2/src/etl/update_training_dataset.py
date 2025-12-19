@@ -7,12 +7,14 @@ from sklearn.model_selection import train_test_split
 BUCKET = os.getenv("S3_BUCKET_NAME")
 AWS_KEY = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET = os.getenv("AWS_SECRET_ACCESS_KEY")
-WINDOW_DAYS = 180  # Данные логов старше 6 месяцев нам не нужны
+
+# Log records older than 6 months are not needed
+WINDOW_DAYS = 90
 
 
 def run_etl():
-    # Генерируем ID версии в начале запуска
-    # Формат: YYYY-MM-DD_HH-MM-SS (гарантирует уникальность внутри дня)
+    # Generate unique version ID at the beginning of the run
+    # Format: YYYY-MM-DD_HH-MM-SS (guarantees uniqueness within the day)
     version_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
     print(f">>> [ETL] Starting Job. Bucket: {BUCKET}")
@@ -22,35 +24,40 @@ def run_etl():
     storage_opts = {"key": AWS_KEY, "secret": AWS_SECRET}
 
     # ---------------------------------------------------------
-    # 1. Читаем GOLDEN SET
+    # 1. Read the GOLDEN SET
     # ---------------------------------------------------------
-    # Мы берем И train И test из истории. Почему?
-    # Потому что для будущей модели старый "test" - это просто хорошие,
-    # качественно размеченные данные, которые грех терять.
-    # Мы проверим модель на НОВОМ split-е.
+    # We read both train and test from history. Why?
+    # Because for future models, the old "test" set is simply high-quality
+    # labeled data that we should not lose.
+    # The model will be evaluated on a NEW split, so the old split does not matter.
 
     df_gold_train = pd.DataFrame()
     df_gold_test = pd.DataFrame()
 
-    # Read Hhistorical data
+    # Read Historical Data
     try:
         path_train = f"s3://{BUCKET}/data/raw/historical/train.csv"
         path_test = f"s3://{BUCKET}/data/raw/historical/test.csv"
-        if fs.exists(path_train): df_gold_train = pd.read_csv(path_train, storage_options=storage_opts)
-        if fs.exists(path_test): df_gold_test = pd.read_csv(path_test, storage_options=storage_opts)
+
+        if fs.exists(path_train):
+            df_gold_train = pd.read_csv(path_train, storage_options=storage_opts)
+
+        if fs.exists(path_test):
+            df_gold_test = pd.read_csv(path_test, storage_options=storage_opts)
+
     except Exception as e:
         print(f"   CRITICAL ERROR: Could not read history. Run ingest first! Details: {e}")
         return
 
     # ---------------------------------------------------------
-    # 2. Читаем LOGS (Свежие данные с окна)
+    # 2. Read LOGS (Fresh data from the sliding window)
     # ---------------------------------------------------------
     print("2. Reading and Filtering Logs...")
     df_logs = pd.DataFrame()
     logs_path = f"{BUCKET}/data/raw/logs/inference/"
 
     try:
-        # Read all .jsonl
+        # Read all .jsonl log files
         log_files = fs.glob(f"{logs_path}*.jsonl")
 
         if log_files:
@@ -61,10 +68,10 @@ def run_etl():
                 with fs.open(file_path) as f:
                     df_chunk = pd.read_json(f, lines=True)
 
-                    # If date in logs make filtering
+                    # If timestamp exists — filter by window
                     if 'timestamp' in df_chunk.columns:
                         df_chunk['timestamp'] = pd.to_datetime(df_chunk['timestamp'])
-                        # Insert only fresh data
+                        # Keep only fresh records
                         df_chunk = df_chunk[df_chunk['timestamp'] >= cutoff_date]
 
                     if not df_chunk.empty:
@@ -91,6 +98,7 @@ def run_etl():
         print("Error: Dataset is empty!")
         return
 
+    # Remove duplicate texts, keeping the latest occurence
     full_df.drop_duplicates(subset=['text'], keep='last', inplace=True)
 
     # ---------------------------------------------------------
@@ -99,9 +107,13 @@ def run_etl():
     print("4. Splitting...")
     try:
         train_df, test_df = train_test_split(
-            full_df, test_size=0.2, stratify=full_df['category'], random_state=42
+            full_df,
+            test_size=0.2,
+            stratify=full_df['category'],
+            random_state=42
         )
     except ValueError:
+        # Stratification may fail if some class has only 1 sample — fallback to random split
         train_df, test_df = train_test_split(full_df, test_size=0.2, random_state=42)
 
     # ---------------------------------------------------------
@@ -109,19 +121,19 @@ def run_etl():
     # ---------------------------------------------------------
     print(f"5. Saving version {version_id} to S3...")
 
-    # Соответствует структуре s3://project/data/processed/ из документа
+    # Folder structure matches s3://project/data/processed/ from documentation
     s3_train_ver = f"s3://{BUCKET}/data/processed/train_{version_id}.parquet"
-    s3_test_ver = f"s3://{BUCKET}/data/processed/test_{version_id}.parquet"
+    s3_test_ver  = f"s3://{BUCKET}/data/processed/test_{version_id}.parquet"
 
-    # Пути для LATEST файла (Указатель для обучения)
+    # Pointers for "LATEST" version used by the Training Service
     s3_train_latest = f"s3://{BUCKET}/data/processed/train_latest.parquet"
-    s3_test_latest = f"s3://{BUCKET}/data/processed/test_latest.parquet"
+    s3_test_latest  = f"s3://{BUCKET}/data/processed/test_latest.parquet"
 
-    # Сохраняем версию (для истории)
+    # Save versioned files (history)
     train_df.to_parquet(s3_train_ver, storage_options=storage_opts)
     test_df.to_parquet(s3_test_ver, storage_options=storage_opts)
 
-    # Сохраняем latest (перезаписываем для Training Service)
+    # Save the LATEST version (overwrites pointer for the training system)
     train_df.to_parquet(s3_train_latest, storage_options=storage_opts)
     test_df.to_parquet(s3_test_latest, storage_options=storage_opts)
 

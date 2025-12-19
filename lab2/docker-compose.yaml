@@ -17,6 +17,7 @@ services:
       - MLFLOW_DEFAULT_ARTIFACT_ROOT=${MLFLOW_S3_ROOT}
     volumes:
       - ./ml_artifacts:/mlflow
+    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:////mlflow/mlflow.db --default-artifact-root ${MLFLOW_S3_ROOT}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
@@ -76,3 +77,22 @@ services:
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
     depends_on:
       - mlflow
+
+  prediction_service:
+    build:
+      context: .
+      dockerfile: Dockerfile.ms
+    container_name: prediction_service
+    restart: always
+    command: uvicorn src.microservices.prediction:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+#    depends_on:
+#      mlflow:
+#        condition: service_healthy

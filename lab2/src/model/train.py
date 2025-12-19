@@ -7,16 +7,38 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import f1_score
 from dotenv import load_dotenv
+from mlflow.exceptions import MlflowException
 
 load_dotenv()
 
-MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
+MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI")
 BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 AWS_KEY = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET = os.getenv("AWS_SECRET_ACCESS_KEY")
 
+if not MLFLOW_URI or not BUCKET_NAME:
+    raise ValueError("MLFLOW_TRACKING_URI or S3_BUCKET_NAME not set!")
+
 mlflow.set_tracking_uri(MLFLOW_URI)
-mlflow.set_experiment("banking-support-classifier")
+
+EXPERIMENT_NAME = "banking-support-classifier-v2"
+
+ARTIFACT_ROOT = f"s3://{BUCKET_NAME}/mlflow_experiments"
+
+print(f">>> Configuring Experiment: {EXPERIMENT_NAME} -> {ARTIFACT_ROOT}")
+
+try:
+    experiment_id = mlflow.create_experiment(
+        name=EXPERIMENT_NAME,
+        artifact_location=ARTIFACT_ROOT
+    )
+    print(f">>> Created new experiment ID: {experiment_id}")
+except MlflowException:
+    experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
+    experiment_id = experiment.experiment_id
+    print(f">>> Experiment exists. ID: {experiment_id}")
+
+mlflow.set_experiment(experiment_id=experiment_id)
 
 
 def train_model():
@@ -81,7 +103,7 @@ def train_model():
         # Save model
         mlflow.sklearn.log_model(
             sk_model=pipeline,
-            artifact_path="",
+            artifact_path="model",
             registered_model_name="BankingSupportBaseline"
         )
         print(">>> SUCCESS: Model trained, evaluated, and pushed to Registry.")

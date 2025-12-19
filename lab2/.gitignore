@@ -8,3 +8,12 @@ dags/__pycache__
 mlruns
 mlruns_
 ml_artifacts
+
+.DS_Store
+../.DS_Store
+**/.DS_Store
+.idea/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd

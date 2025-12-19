@@ -16,6 +16,11 @@ docker-compose run --rm trainer python src/model/train.py
 ```
 
 ### Start prediction ms
+Rebuild if any changes were made
+```
+docker-compose up -d --build prediction_service
+```
+or just start
 ```
 docker-compose up -d prediction_service
 ```

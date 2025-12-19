@@ -65,19 +65,6 @@ services:
       - .:/app
 
   # 4. Prediction API
-  api:
-    build: .
-    container_name: prediction_service
-    ports:
-      - "8000:8000"
-    environment:
-      - MLFLOW_TRACKING_URI=http://mlflow:5000
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
-    depends_on:
-      - mlflow
-
   prediction_service:
     build:
       context: .

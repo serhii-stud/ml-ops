@@ -1,0 +1,6 @@
+apache-airflow
+pandas
+s3fs
+boto3
+scikit-learn
+python-dotenv

@@ -5,7 +5,7 @@ import boto3
 import mlflow.sklearn
 from datetime import datetime
 from mlflow.tracking import MlflowClient
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
@@ -50,15 +50,14 @@ class Ticket(BaseModel):
     text: str
 
 
-def log_prediction_to_s3(ticket_text: str, prediction: str, model_version: str):
+def log_prediction_to_s3(request_id: str, ticket_text: str, prediction: str, model_version: str):
     """
     Logs data in JSONL format (single line + \n).
     S3 does not support appending to files, so we write separate objects
     that can be easily concatenated later.
     """
     try:
-        request_id = str(uuid.uuid4())
-        # Use UTC for logs - this is standard practice
+        # Use UTC for logs
         timestamp = datetime.utcnow().isoformat()
 
         log_data = {
@@ -77,13 +76,12 @@ def log_prediction_to_s3(ticket_text: str, prediction: str, model_version: str):
         date_folder = datetime.now().strftime("%Y-%m-%d")
         file_key = f"data/raw/logs/inference/{date_folder}/{request_id}.jsonl"
 
-        # 3. Upload to S3
+        # 3. Upload
         s3_client.put_object(
             Bucket=S3_BUCKET_NAME,
             Key=file_key,
             Body=jsonl_line
         )
-        # Optional: print what was saved (helps with debugging via docker logs)
         print(f"Log S3: {file_key}")
 
     except Exception as e:
@@ -91,21 +89,32 @@ def log_prediction_to_s3(ticket_text: str, prediction: str, model_version: str):
 
 
 @app.post("/predict")
-def predict(ticket: Ticket):
+def predict(ticket: Ticket, request: Request):
     if "model" not in ml_model:
         raise HTTPException(status_code=503, detail="Model not loaded")
+
+    request_id = request.headers.get("X-Request-ID")
+    if not request_id:
+        request_id = str(uuid.uuid4())
 
     try:
         prediction_array = ml_model["model"].predict([ticket.text])
         predicted_category = prediction_array[0]
 
+        current_version = ml_model.get("version", "unknown")
+
         log_prediction_to_s3(
+            request_id=request_id,
             ticket_text=ticket.text,
             prediction=predicted_category,
-            model_version=ml_model.get("version", "unknown")
+            model_version=current_version
         )
 
-        return {"category": predicted_category}
+        return {
+            "request_id": request_id,
+            "category": predicted_category,
+            "model_version": current_version
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")

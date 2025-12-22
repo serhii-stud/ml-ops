@@ -10,41 +10,41 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
-# --- КОНФИГУРАЦИЯ ---
+# --- CONFIGURATION ---
 MODEL_NAME = "BankingSupportBaseline"
 MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow_server:5000")
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 
-# Настройки батчинга
-FLUSH_INTERVAL_SECONDS = 60  # Сбрасываем логи раз в минуту
-LOG_BUFFER = []  # Глобальный буфер в памяти
+# Batching settings
+FLUSH_INTERVAL_SECONDS = 60  # Flush logs once a minute
+LOG_BUFFER = []  # Global in-memory buffer
 
 ml_model = {}
 s3_client = boto3.client("s3")
 
 
 async def flush_logs_periodically():
-    """Фоновая задача: раз в N секунд отправляет накопленные логи в S3."""
+    """Background task: flushes accumulated logs to S3 every N seconds."""
     while True:
         try:
             await asyncio.sleep(FLUSH_INTERVAL_SECONDS)
             await flush_buffer_to_s3()
         except asyncio.CancelledError:
-            # Если сервис останавливают, выходим из цикла
+            # If the service is stopping, exit the loop
             break
         except Exception as e:
             print(f"ERROR in background logger: {e}")
 
 
 async def flush_buffer_to_s3():
-    """Синхронная отправка данных из буфера в S3."""
+    """Synchronously uploads data from buffer to S3."""
     global LOG_BUFFER
 
     if not LOG_BUFFER:
-        return  # Буфер пуст, экономим запрос к S3
+        return  # Buffer is empty, save an S3 request
 
-    # 1. Забираем данные и очищаем глобальный буфер (атомарно для event loop)
-    # Копируем ссылки в локальную переменную, а глобальную чистим
+    # 1. Retrieve data and clear global buffer (atomic for event loop)
+    # Copy references to local variable, clear the global one
     current_batch = LOG_BUFFER[:]
     LOG_BUFFER.clear()
 
@@ -52,18 +52,19 @@ async def flush_buffer_to_s3():
     print(f">>> Flushing {count} logs to S3...")
 
     try:
-        # 2. Формируем тело файла (NDJSON)
-        # Каждый элемент — это JSON-строка + перенос строки
+        # 2. Create file body (NDJSON)
+        # Each element is a JSON string + newline
         body = "\n".join([json.dumps(record, ensure_ascii=False) for record in current_batch])
 
-        # 3. Генерируем имя файла: logs/inference/YYYY-MM-DD/batch_HHMMSS_uuid.jsonl
+        # 3. Generate filename: logs/inference/YYYY-MM-DD/batch_HHMMSS_uuid.jsonl
         now = datetime.utcnow()
         date_folder = now.strftime("%Y-%m-%d")
         file_name = f"batch_{now.strftime('%H%M%S')}_{uuid.uuid4()}.jsonl"
         key = f"data/raw/logs/inference/{date_folder}/{file_name}"
 
-        # 4. Отправляем в S3 (в потоке, чтобы не блочить, используем run_in_executor если нужно,
-        # но boto3 быстрый, для простоты оставим так)
+        # 4. Upload to S3
+        # Note: put_object is blocking, but since it runs once/min in background,
+        # it's acceptable for this scale. For high load, consider run_in_executor.
         s3_client.put_object(
             Bucket=S3_BUCKET_NAME,
             Key=key,
@@ -73,12 +74,11 @@ async def flush_buffer_to_s3():
 
     except Exception as e:
         print(f"CRITICAL: Failed to write logs to S3. Data lost! Error: {e}")
-        # В реальном проде тут можно было бы вернуть данные обратно в LOG_BUFFER
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # --- ЗАПУСК ---
+    # --- STARTUP ---
     print(f">>> Connecting to MLflow at {MLFLOW_URI}...")
     mlflow.set_tracking_uri(MLFLOW_URI)
     client = MlflowClient()
@@ -94,18 +94,18 @@ async def lifespan(app: FastAPI):
         print(f">>> SUCCESS: Model loaded")
     except Exception as e:
         print(f"CRITICAL ERROR: Failed to load model. {e}")
-        # Не падаем, чтобы контейнер жил, но работать не будем
+        # Don't crash so the container stays alive, but service won't work
 
-    # Запускаем фоновую задачу логирования
+    # Start background logging task
     logger_task = asyncio.create_task(flush_logs_periodically())
 
     yield
 
-    # --- ОСТАНОВКА ---
+    # --- SHUTDOWN ---
     print(">>> Shutting down... Flushing remaining logs.")
-    # Отменяем фоновую задачу
+    # Cancel background task
     logger_task.cancel()
-    # Финальный сброс остатков перед смертью
+    # Final flush of remaining logs before death
     await flush_buffer_to_s3()
     ml_model.clear()
 
@@ -118,7 +118,7 @@ class Ticket(BaseModel):
 
 
 def buffer_prediction(request_id: str, ticket_text: str, prediction: str, model_version: str):
-    """Просто добавляет запись в список (в памяти)."""
+    """Adds a record to the list (in memory)."""
     timestamp = datetime.utcnow().isoformat()
 
     log_entry = {
@@ -131,8 +131,8 @@ def buffer_prediction(request_id: str, ticket_text: str, prediction: str, model_
     }
 
     LOG_BUFFER.append(log_entry)
-    # Если вдруг буфер переполнился (например, 1000 записей), можно форсированно сбросить,
-    # но пока оставим простую логику по таймеру.
+    # If buffer overflows (e.g., >10k items), we could force flush here,
+    # but the timer logic is sufficient for now.
 
 
 @app.post("/predict")
@@ -140,18 +140,18 @@ def predict(ticket: Ticket, request: Request):
     if "model" not in ml_model:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
-    # Получаем или генерируем ID
+    # Get or generate ID
     request_id = request.headers.get("X-Request-ID")
     if not request_id:
         request_id = str(uuid.uuid4())
 
     try:
-        # Предикт
+        # Predict
         prediction_array = ml_model["model"].predict([ticket.text])
         predicted_category = prediction_array[0]
         current_version = ml_model.get("version", "unknown")
 
-        # Логирование (теперь это мгновенно, т.к. пишем в память)
+        # Logging (now instant, as we write to memory)
         buffer_prediction(
             request_id=request_id,
             ticket_text=ticket.text,

@@ -1,0 +1,27 @@
+version: '3.7'
+
+services:
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    container_name: mlflow_server
+    expose:
+      - "5000"
+    # ОБРАТИ ВНИМАНИЕ: путь к базе теперь лежит в папке /mlflow/
+    command: mlflow server --host 0.0.0.0 --backend-store-uri sqlite:////mlflow/mlflow.db --default-artifact-root /mlruns
+    environment:
+      - MLFLOW_HOST=0.0.0.0
+    volumes:
+      - ./mlruns:/mlruns
+      - ./mlflow_data:/mlflow  # Монтируем папку целиком
+    restart: always
+
+  nginx:
+    image: nginx:latest
+    container_name: mlflow_proxy
+    ports:
+      - "5000:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - mlflow
+    restart: always

@@ -27,33 +27,23 @@ def install_requirements(req_path: str):
 def parse_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument(
-        "--train_file",
-        type=str,
-        default="train_latest.parquet",
-        help="Train parquet filename inside the 'train' channel directory.",
-    )
-    parser.add_argument(
-        "--test_file",
-        type=str,
-        default="test_latest.parquet",
-        help="Test parquet filename inside the 'test' channel directory.",
-    )
-    parser.add_argument(
-        "--requirements",
-        type=str,
-        default=None,
-        help="Path to requirements.txt inside the container (optional).",
-    )
+    parser.add_argument("--train_file", type=str, default="train.parquet")
+    parser.add_argument("--test_file", type=str, default="test.parquet")
+    parser.add_argument("--requirements", type=str, default=None)
 
-    # Model hyperparameters (baseline)
     parser.add_argument("--max_features", type=int, default=50000)
     parser.add_argument("--C", type=float, default=2.0)
 
-    return parser.parse_args()
+    # IMPORTANT: ignore unknown SageMaker/system args to avoid ExitCode=2
+    args, unknown = parser.parse_known_args()
+    if unknown:
+        print("[WARN] Ignoring unknown args:", unknown)
+
+    return args
 
 
 def main():
+    print("[DEBUG] argv:", sys.argv)
     args = parse_args()
 
     # Install deps early (pyarrow for parquet)

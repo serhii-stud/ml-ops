@@ -154,6 +154,15 @@ def main():
         X_train = df_train["text"].astype(str).values
         y_train = df_train["category"].astype(str).values
 
+        # Get weights prepared in the Processing Job. Default to 1.0 if the column is missing.
+        if "sample_weight" in df_train.columns:
+            train_weights = df_train["sample_weight"].values
+            print(f"[INFO] Using sample weights. Unique values: {df_train['sample_weight'].unique()}")
+        else:
+            import numpy as np
+            train_weights = np.ones(len(df_train))
+            print("[WARN] 'sample_weight' column not found. Defaulting to 1.0.")
+
         X_test = df_test["text"].astype(str).values
         y_test = df_test["category"].astype(str).values
 
@@ -166,7 +175,9 @@ def main():
         )
 
         print("[INFO] Training...")
-        clf.fit(X_train, y_train)
+        
+        # Using step_name__parameter syntax to pass weights specifically to the LogisticRegression (lr) step.
+        clf.fit(X_train, y_train, lr__sample_weight=train_weights)
 
         # --- eval ---
         print("[INFO] Evaluating...")
@@ -255,3 +266,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    

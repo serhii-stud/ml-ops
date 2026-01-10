@@ -136,6 +136,11 @@ def deploy_sagemaker_endpoint(
             "Environment": {
                 "MLFLOW_DISABLE_ENV_CREATION": "true",
                 "MLFLOW_ENV_MANAGER": "local",
+                "ENDPOINT_NAME": endpoint_name,
+                "MODEL_VERSION": str(mlflow_model_version),   # или mv.run_id, или и то и то
+                "MLFLOW_RUN_ID": mv.run_id,                   # если хочешь
+                "METRICS_NAMESPACE": "MLOps/BankingEndpoint",
+                "METRICS_SAMPLE_RATE": "0.2"
             },
         },
         Tags=tags,

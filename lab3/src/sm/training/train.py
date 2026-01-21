@@ -103,7 +103,7 @@ def main():
     try:
         mlflow.sklearn.autolog(
             log_models=False,  # модель логируем сами (у тебя mlflow.sklearn.log_model)
-            log_input_examples=False,
+            log_input_examples=True,
             silent=True,
         )
         print("[INFO] mlflow.sklearn.autolog enabled (log_models=False).")

@@ -3,17 +3,18 @@ import json
 import uuid
 import boto3
 import asyncio
-import mlflow.sklearn
 from datetime import datetime
-from mlflow.tracking import MlflowClient
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
 # --- CONFIGURATION ---
-MODEL_NAME = "BankingSupportBaseline"
-MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow_server:5000")
+MODEL_NAME = "N/A (Sagemeker Endpoint)"
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
+
+# --- SageMaker Endpoint ---
+SAGEMAKER_ENDPOINT_NAME = os.getenv("SAGEMAKER_ENDPOINT_NAME", "banking-support-classifier-prod")
+SAGEMAKER_CONTENT_TYPE = os.getenv("SAGEMAKER_CONTENT_TYPE", "application/json")
 
 # Batching settings
 FLUSH_INTERVAL_SECONDS = 60  # Flush logs once a minute
@@ -21,6 +22,9 @@ LOG_BUFFER = []  # Global in-memory buffer
 
 ml_model = {}
 s3_client = boto3.client("s3")
+
+# SageMaker runtime client (data-plane)
+sm_runtime = boto3.client("sagemaker-runtime")
 
 
 async def flush_logs_periodically():
@@ -30,7 +34,6 @@ async def flush_logs_periodically():
             await asyncio.sleep(FLUSH_INTERVAL_SECONDS)
             await flush_buffer_to_s3()
         except asyncio.CancelledError:
-            # If the service is stopping, exit the loop
             break
         except Exception as e:
             print(f"ERROR in background logger: {e}")
@@ -43,8 +46,6 @@ async def flush_buffer_to_s3():
     if not LOG_BUFFER:
         return  # Buffer is empty, save an S3 request
 
-    # 1. Retrieve data and clear global buffer (atomic for event loop)
-    # Copy references to local variable, clear the global one
     current_batch = LOG_BUFFER[:]
     LOG_BUFFER.clear()
 
@@ -52,19 +53,17 @@ async def flush_buffer_to_s3():
     print(f">>> Flushing {count} logs to S3...")
 
     try:
-        # 2. Create file body (NDJSON)
-        # Each element is a JSON string + newline
         body = "\n".join([json.dumps(record, ensure_ascii=False) for record in current_batch])
 
-        # 3. Generate filename: logs/inference/YYYY-MM-DD/batch_HHMMSS_uuid.jsonl
         now = datetime.utcnow()
         date_folder = now.strftime("%Y-%m-%d")
         file_name = f"batch_{now.strftime('%H%M%S')}_{uuid.uuid4()}.jsonl"
         key = f"data/raw/logs/inference/{date_folder}/{file_name}"
 
-        # 4. Upload to S3
-        # Note: put_object is blocking, but since it runs once/min in background,
-        # it's acceptable for this scale. For high load, consider run_in_executor.
+        if not S3_BUCKET_NAME:
+            print("CRITICAL: S3_BUCKET_NAME is not set. Logs will be dropped.")
+            return
+
         s3_client.put_object(
             Bucket=S3_BUCKET_NAME,
             Key=key,
@@ -76,25 +75,65 @@ async def flush_buffer_to_s3():
         print(f"CRITICAL: Failed to write logs to S3. Data lost! Error: {e}")
 
 
+def call_sagemaker_endpoint(text: str) -> str:
+    """
+    Calls SageMaker endpoint and returns predicted category as string.
+
+    Endpoint expects:
+      {
+        "dataframe_split": {
+          "columns": ["text"],
+          "data": [["..."]]
+        }
+      }
+
+    Endpoint returns:
+      {"predictions": ["country_support"]}
+    """
+    endpoint_name = ml_model.get("endpoint_name")
+    if not endpoint_name:
+        raise RuntimeError("Endpoint is not configured")
+
+    payload = {
+        "inputs": [text]
+    }
+
+    resp = sm_runtime.invoke_endpoint(
+        EndpointName=endpoint_name,
+        ContentType=SAGEMAKER_CONTENT_TYPE,
+        Accept="application/json",
+        Body=json.dumps(payload).encode("utf-8"),
+    )
+
+    raw = resp["Body"].read().decode("utf-8")
+
+    try:
+        data = json.loads(raw)
+    except Exception:
+        raise RuntimeError(f"Non-JSON response from endpoint: {raw[:300]}")
+
+    if isinstance(data, dict) and "predictions" in data and isinstance(data["predictions"], list) and data["predictions"]:
+        return str(data["predictions"][0])
+
+    # Fallbacks (in case handler changes)
+    if isinstance(data, dict):
+        if "category" in data:
+            return str(data["category"])
+        if "prediction" in data:
+            return str(data["prediction"])
+
+    raise RuntimeError(f"Unexpected endpoint response: {data}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # --- STARTUP ---
-    print(f">>> Connecting to MLflow at {MLFLOW_URI}...")
-    mlflow.set_tracking_uri(MLFLOW_URI)
-    client = MlflowClient()
-
-    try:
-        versions = client.get_latest_versions(MODEL_NAME)
-        latest_version = max(versions, key=lambda v: int(v.version))
-        print(f">>> Found latest version: v{latest_version.version}")
-
-        model_uri = f"models:/{MODEL_NAME}/{latest_version.version}"
-        ml_model["model"] = mlflow.sklearn.load_model(model_uri)
-        ml_model["version"] = latest_version.version
-        print(f">>> SUCCESS: Model loaded")
-    except Exception as e:
-        print(f"CRITICAL ERROR: Failed to load model. {e}")
-        # Don't crash so the container stays alive, but service won't work
+    if not SAGEMAKER_ENDPOINT_NAME:
+        print("CRITICAL ERROR: SAGEMAKER_ENDPOINT_NAME is not set. Model calls will not work.")
+    else:
+        ml_model["endpoint_name"] = SAGEMAKER_ENDPOINT_NAME
+        ml_model["version"] = "endpoint"  # keep contract field
+        print(f">>> SUCCESS: Endpoint configured: {SAGEMAKER_ENDPOINT_NAME}")
 
     # Start background logging task
     logger_task = asyncio.create_task(flush_logs_periodically())
@@ -103,9 +142,7 @@ async def lifespan(app: FastAPI):
 
     # --- SHUTDOWN ---
     print(">>> Shutting down... Flushing remaining logs.")
-    # Cancel background task
     logger_task.cancel()
-    # Final flush of remaining logs before death
     await flush_buffer_to_s3()
     ml_model.clear()
 
@@ -131,27 +168,19 @@ def buffer_prediction(request_id: str, ticket_text: str, prediction: str, model_
     }
 
     LOG_BUFFER.append(log_entry)
-    # If buffer overflows (e.g., >10k items), we could force flush here,
-    # but the timer logic is sufficient for now.
 
 
 @app.post("/predict")
 def predict(ticket: Ticket, request: Request):
-    if "model" not in ml_model:
-        raise HTTPException(status_code=503, detail="Model not loaded")
+    if "endpoint_name" not in ml_model:
+        raise HTTPException(status_code=503, detail="Endpoint not configured")
 
-    # Get or generate ID
-    request_id = request.headers.get("X-Request-ID")
-    if not request_id:
-        request_id = str(uuid.uuid4())
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
 
     try:
-        # Predict
-        prediction_array = ml_model["model"].predict([ticket.text])
-        predicted_category = prediction_array[0]
+        predicted_category = call_sagemaker_endpoint(ticket.text)
         current_version = ml_model.get("version", "unknown")
 
-        # Logging (now instant, as we write to memory)
         buffer_prediction(
             request_id=request_id,
             ticket_text=ticket.text,
@@ -159,6 +188,7 @@ def predict(ticket: Ticket, request: Request):
             model_version=current_version
         )
 
+        # Keep existing response contract
         return {
             "request_id": request_id,
             "category": predicted_category,

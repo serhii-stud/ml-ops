@@ -7,7 +7,7 @@ from datetime import datetime
 
 # --- CONFIGURATION ---
 API_URL = "http://0.0.0.0:8000/predict"
-TOTAL_REQUESTS = 20  # How many requests to generate
+TOTAL_REQUESTS = 30  # How many requests to generate
 current_date = datetime.now().strftime("%Y-%m-%d")
 OUTPUT_FILE = f"requests_history_{current_date}.csv"
 MIN_DELAY = 0.1
@@ -16,121 +16,167 @@ MAX_DELAY = 0.5
 # Dataset mapping: True Category -> List of phrases
 # We need this structure to know the "Ground Truth" for future corrections
 # Dataset mapping: True Category -> List of phrases
+
 DATASET = {
     "card_arrival": [
-        # Direct questions
-        "Where is my card?",
-        "When will the credit card arrive?",
-        "Has my card been shipped yet?",
-        # Status checks
-        "Track my card delivery status",
-        "Check delivery status",
-        "Show me the tracking number for my card",
-        # Time complaints
-        "I ordered a card last week and it's still not here",
-        "It's been 10 days, where is my visa?",
-        "Waiting too long for the card delivery",
-        "Is my card lost in the mail?"
+        # Logistics / Status
+        "Any update on when the card is supposed to arrive?",
+        "My plastic hasn't shown up yet, what's going on?",
+        "Still no envelope from you guys",
+        "Has the shipment left the warehouse?",
+        "When should I expect the card delivery?",
+
+        # Anxiety / Informal
+        "Been weeks… where is it?",
+        "Mailbox empty again 😐",
+        "Is this normal delivery time?",
+        "Feels like the card is lost already",
+
+        # Address / Tracking
+        "I recently moved, could that affect delivery?",
+        "Tracking link doesn't open",
+        "Courier says completed but nothing received"
     ],
+
     "lost_or_stolen_card": [
-        # Emergency
-        "Help, my card was stolen!",
-        "Someone stole my wallet",
-        "Emergency! Card theft",
-        "I think I was pickpocketed",
-        # Lost
-        "I lost my wallet with my card",
-        "I cannot find my visa card",
-        "I dropped my card somewhere in the park",
-        "My card is missing",
-        # Action requests
-        "Block my card immediately please",
-        "Freeze my account, lost card",
-        "Deactivate my card right now",
-        "Need to cancel lost card"
+        # Loss scenarios
+        "Pretty sure my wallet is gone",
+        "Someone must have taken my card",
+        "Card disappeared overnight",
+        "Can't find it anywhere",
+
+        # Security-driven wording
+        "I suspect card compromise",
+        "Possible theft, need to act fast",
+        "Someone tried to pay with my card",
+        "Strange transactions showing up",
+
+        # Urgent actions
+        "Freeze everything now",
+        "Block card immediately please",
+        "I want to order a new one"
     ],
+
     "balance_check": [
-        # Simple
-        "What is my current balance?",
-        "How much money do I have left?",
-        "Show me my account total",
-        "Balance inquiry",
-        # Specific
-        "How much cash is available?",
-        "Do I have enough for a $500 purchase?",
-        "Check funds",
-        "What's the remaining limit?",
-        # App/UI references
-        "I can't see my balance in the app",
-        "Why is my balance not updating?",
-        "Tell me my net worth"
+        # Casual / Modern
+        "How much cash do I even have?",
+        "What’s left after yesterday?",
+        "Is my account empty?",
+        "Can I survive till payday?",
+
+        # App / UX language
+        "Show me my current funds",
+        "Quick balance check",
+        "Snapshot of my account",
+
+        # Temporal
+        "Balance after rent payment?",
+        "Did the transfer increase my balance?",
+        "Status after last transaction"
     ],
+
     "declined_card_payment": [
-        # Confusion
-        "My payment was declined at the shop",
-        "Why can't I buy this coffee?",
-        "I have money, why did the transaction fail?",
-        # Technical
-        "Transaction rejected",
-        "Card not working",
-        "Payment error 404",
-        "The terminal said declined",
-        # Specific scenarios
-        "Netflix payment didn't go through",
-        "Got embarrassed at the restaurant, card rejected",
-        "Online purchase failed",
-        "Unable to pay for my ticket"
+        # Physical world
+        "Terminal rejected my card",
+        "POS wouldn’t accept payment",
+        "Cashier said transaction failed",
+        "Payment bounced",
+
+        # Digital / Subscription
+        "Streaming service says payment issue",
+        "Online checkout keeps failing",
+        "My card isn’t working on apps",
+
+        # Confusion / Debugging
+        "There’s money but it still declines",
+        "Why am I blocked from paying?",
+        "Is my card restricted?"
     ],
+
     "country_support": [
-        # Travel plans
-        "Do you support US payments?",
-        "Can I use this in France?",
-        "I am traveling to Japan next week",
-        "Will my card work in Germany?",
-        # Currency/Region
-        "Do you support payments in USD?",
-        "Is this card valid in the EU?",
-        "Can I withdraw cash in Bali?",
-        "Restricted countries list",
-        "Using card abroad"
+        # Travel intent
+        "Flying abroad, do I need to enable something?",
+        "Can I swipe my card outside Europe?",
+        "Using card while travelling",
+
+        # Countries / Regions
+        "Payments in Asia supported?",
+        "Does this card work in Mexico?",
+        "Non-EU card usage",
+
+        # Fees / Limits
+        "Extra charges overseas?",
+        "Is FX applied automatically?",
+        "Do I need travel mode?"
     ],
-"cancel_transfer": [
-        "I sent money to the wrong person, cancel it!",
-        "Stop the transfer immediately",
-        "I made a mistake in the transaction",
-        "Can I reverse a payment?",
-        "Please undo the last transfer",
-        "I want to claim my money back",
-        "Accidental transfer, help"
+
+    "cancel_transfer": [
+        # Immediate regret
+        "Oops, sent money too fast",
+        "I made a mistake with the transfer",
+        "That payment shouldn’t have gone out",
+
+        # Technical wording
+        "Cancel pending transaction",
+        "Reverse last transfer",
+        "Is rollback possible?",
+
+        # Fraud concern
+        "I think I was tricked into sending money",
+        "Transfer sent under false pretenses"
     ],
+
     "terminate_account": [
-        "I want to close my account",
-        "Terminate my contract",
-        "I am leaving this bank",
-        "How do I delete my profile?",
-        "Close account and withdraw all funds",
-        "I'm not happy with your service, goodbye",
-        "Cancel my subscription and account"
+        # Neutral / Formal
+        "Requesting account closure",
+        "I would like to terminate my account",
+        "Please proceed with closing my profile",
+
+        # Emotional
+        "This service no longer works for me",
+        "I’m done banking here",
+        "Time to move on",
+
+        # Data & compliance
+        "Delete all my personal records",
+        "Confirm full account shutdown",
+        "End customer relationship"
     ],
+
     "edit_personal_details": [
-        "I moved to a new house, how to change address?",
-        "Update my phone number",
-        "My last name changed after marriage",
-        "I need to update my personal info",
-        "Change billing address",
-        "Incorrect date of birth in my profile",
-        "Edit contact details"
+        # Identity
+        "My legal name has changed",
+        "Surname update required",
+        "Incorrect personal info on file",
+
+        # Contact data
+        "New phone number, old one inactive",
+        "Email change request",
+        "Wrong address saved",
+
+        # Compliance
+        "Need to update identity details",
+        "Adjust customer profile"
     ],
+
     "exchange_rate": [
-        "What is the current exchange rate for Euro?",
-        "How much is 1 USD in GBP?",
-        "Check currency rates",
-        "Exchange rate for today",
-        "Do you have good rates for Yen?",
-        "Convert 100 dollars to euros",
-        "Forex rates please"
+        # Conversational
+        "What’s today’s FX rate?",
+        "How bad is the conversion?",
+        "Am I getting ripped off on exchange?",
+
+        # Comparative
+        "Better than street exchange?",
+        "Compare with bank rates",
+        "Is this market rate?",
+
+        # Specific intent
+        "Convert EUR to JPY",
+        "USD exchange pricing",
+        "Foreign currency costs"
     ]
 }
+
 
 
 def generate_traffic():

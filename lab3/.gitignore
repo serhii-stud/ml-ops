@@ -17,3 +17,4 @@ ml_artifacts
 *.pyc
 *.pyo
 *.pyd
+/requests_history*

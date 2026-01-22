@@ -71,7 +71,7 @@ def test_training_with_sample_weights_does_not_crash(tiny_dataset: pd.DataFrame)
 
 def test_sagemaker_safe_name_helper() -> None:
     # Юнит-тест на маленькую функцию, которая реально важна для деплоя
-    from deploy_to_endpoint import _sm_safe_name
+    from ..src.deployment.deploy_to_endpoint import _sm_safe_name
 
     assert _sm_safe_name("Hello World!") == "Hello-World"
     assert _sm_safe_name("%%%") == "mlflow-run"

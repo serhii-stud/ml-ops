@@ -5,6 +5,7 @@ name: CI-DEV
 #    branches: [ "main", "master" ]
 #    paths:
 #      - "lab4/**"
+  workflow_dispatch:
   push:
     branches: [ "main", "master" ]
     paths:

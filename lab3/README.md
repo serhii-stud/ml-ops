@@ -1,3 +1,12 @@
+### Feedback loop
+```
+IF data_drift_detected AND quality_ok:
+    collect labels
+ELIF quality_drop AND no_data_drift:
+    concept_shift → revise labels / classes
+ELIF both:
+    retrain with feedback + manual labels
+```
 ### Start airflow
 ```
 docker-compose up -d airflow_etl
@@ -63,3 +72,6 @@ docker-compose logs <SERVICE_NAME>
 `src/etl` - tasks for airflow dags
 
 `ml_artifacs` - local db for mlflow(sqllight)
+
+## Image for SM Endpoint
+191072691166.dkr.ecr.us-east-1.amazonaws.com/mlflow-pyfunc:3.8.1

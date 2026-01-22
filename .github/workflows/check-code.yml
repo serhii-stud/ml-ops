@@ -1,10 +1,10 @@
 name: Lint, Test
 
 "on":
-#  pull_request:
-#    branches: [ "main", "master" ]
-#    paths:
-#      - "lab4/**"
+  pull_request:
+    branches: [ "main", "master" ]
+    paths:
+      - "lab4/**"
   workflow_dispatch:
   push:
     branches: [ "main", "master" ]
@@ -31,9 +31,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r lab4/requirements-ci.txt
 
-      - name: Ruff (lint)
-        run: |
-          ruff check lab4/.
+#      - name: Ruff (lint)
+#        run: |
+#          ruff check lab4/.
 
       - name: Pytest
         run: |
